@@ -32,6 +32,16 @@ defmodule Phoenix.PubSub.RabbitMQServer do
             opts: opts}}
   end
 
+  def subscribe(pool_name, pid, topic, opts) do
+    GenServer.call(pool_name, {:subscribe, pid, topic, opts})
+  end
+  def unsubscribe(pool_name, pid, topic) do
+    GenServer.call(pool_name, {:subscribe, pid, topic})
+  end
+  def broadcast(pool_name,from_pid, topic, msg) do
+    GenServer.call(pool_name, {:broadcast, from_pid, topic, msg})
+  end
+
   def handle_call({:subscribe, pid, topic, opts}, _from, state) do
     link = Keyword.get(opts, :link, false)
 
