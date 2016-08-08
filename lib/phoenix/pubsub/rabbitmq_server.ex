@@ -13,33 +13,34 @@ defmodule Phoenix.PubSub.RabbitMQServer do
   See `Phoenix.PubSub.RabbitMQ` for details and configuration options.
   """
 
-  def start_link(server_name, conn_pool_name, pub_pool_name, opts) do
-    GenServer.start_link(__MODULE__, [server_name, conn_pool_name, pub_pool_name, opts], name: server_name)
+  def start_link(server_name, conn_pool_base, pub_pool_base, opts) do
+    GenServer.start_link(__MODULE__, [server_name, conn_pool_base, pub_pool_base, opts], name: server_name)
   end
 
   @doc """
   Initializes the server.
 
   """
-  def init([server_name, conn_pool_name, pub_pool_name, opts]) do
+  def init([server_name, conn_pool_base, pub_pool_base, opts]) do
     Process.flag(:trap_exit, true)
+    ## TODO: make state compact
     {:ok, %{cons: HashDict.new,
             subs: HashDict.new,
-            conn_pool_name: conn_pool_name,
-            pub_pool_name: pub_pool_name,
+            conn_pool_base: conn_pool_base,
+            pub_pool_base: pub_pool_base,
             exchange: rabbitmq_namespace(server_name),
             node_ref: :crypto.strong_rand_bytes(16),
             opts: opts}}
   end
 
-  def subscribe(pool_name, pid, topic, opts) do
-    GenServer.call(pool_name, {:subscribe, pid, topic, opts})
+  def subscribe(server_name, pid, topic, opts) do
+    GenServer.call(server_name, {:subscribe, pid, topic, opts})
   end
-  def unsubscribe(pool_name, pid, topic) do
-    GenServer.call(pool_name, {:subscribe, pid, topic})
+  def unsubscribe(server_name, pid, topic) do
+    GenServer.call(server_name, {:subscribe, pid, topic})
   end
-  def broadcast(pool_name,from_pid, topic, msg) do
-    GenServer.call(pool_name, {:broadcast, from_pid, topic, msg})
+  def broadcast(server_name,from_pid, topic, msg) do
+    GenServer.call(server_name, {:broadcast, from_pid, topic, msg})
   end
 
   def handle_call({:subscribe, pid, topic, opts}, _from, state) do
@@ -51,7 +52,9 @@ defmodule Phoenix.PubSub.RabbitMQServer do
               end
 
     unless has_key do
-      {:ok, consumer_pid} = Consumer.start(state.conn_pool_name,
+      pool_index      = RabbitMQ.target_shard_index(state.opts[:shard_num], topic)
+      conn_pool_name = RabbitMQ.create_pool_name(state.conn_pool_base, pool_index)
+      {:ok, consumer_pid} = Consumer.start(conn_pool_name,
                                            state.exchange, topic,
                                            pid,
                                            state.node_ref,
@@ -92,7 +95,9 @@ defmodule Phoenix.PubSub.RabbitMQServer do
   end
 
   def handle_call({:broadcast, from_pid, topic, msg}, _from, state) do
-    case RabbitMQ.publish(state.pub_pool_name,
+    pool_index    = RabbitMQ.target_shard_index(state.opts[:shard_num], topic)
+    pub_pool_name = RabbitMQ.create_pool_name(state.pub_pool_base, pool_index)
+    case RabbitMQ.publish(pub_pool_name,
                           state.exchange,
                           topic,
                           :erlang.term_to_binary({state.node_ref, from_pid, msg}),

@@ -51,23 +51,35 @@ defmodule Phoenix.PubSub.RabbitMQ do
   end
 
   def init([name, opts]) do
-    conn_pool_name = Module.concat(__MODULE__, ConnPool) |> Module.concat(name)
-    pub_pool_name  = Module.concat(__MODULE__, PubPool)  |> Module.concat(name)
+    conn_pool_base = Module.concat(__MODULE__, ConnPool) |> Module.concat(name)
+    pub_pool_base  = Module.concat(__MODULE__, PubPool)  |> Module.concat(name)
 
-    conn_pool_opts = [
-      name: {:local, conn_pool_name},
-      worker_module: Phoenix.PubSub.RabbitMQConn,
-      size: opts[:pool_size] || @pool_size,
-      strategy: :fifo,
-      max_overflow: 0
-    ]
+    hosts = opts[:options][:hosts]
+    shard_num = length(hosts)
 
-    pub_pool_opts = [
-      name: {:local, pub_pool_name},
-      worker_module: Phoenix.PubSub.RabbitMQPub,
-      size: opts[:pool_size] || @pool_size,
-      max_overflow: 0
-    ]
+    conn_pools = 1..shard_num |> Enum.map(fn(n) ->
+      conn_pool_name = create_pool_name(conn_pool_base, n)
+      conn_pool_opts = [
+        name: {:local, conn_pool_name},
+        worker_module: Phoenix.PubSub.RabbitMQConn,
+        size: opts[:pool_size] || @pool_size,
+        strategy: :fifo,
+        max_overflow: 0
+      ]
+      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [opts[:options] ++ [host: Enum.at(hosts, n - 1)]])
+    end)
+
+    pub_pools = 1..shard_num |> Enum.map(fn(n) ->
+      conn_pool_name  = create_pool_name(conn_pool_base, n)
+      pub_pool_name   = create_pool_name(pub_pool_base, n)
+      pub_pool_opts = [
+        name: {:local, pub_pool_name},
+        worker_module: Phoenix.PubSub.RabbitMQPub,
+        size: opts[:pool_size] || @pool_size,
+        max_overflow: 0
+      ]
+      :poolboy.child_spec(pub_pool_name, pub_pool_opts, conn_pool_name)
+    end)
 
     pool_size = @pool_size
     dispatch_rules = [
@@ -76,13 +88,19 @@ defmodule Phoenix.PubSub.RabbitMQ do
         {:unsubscribe, Phoenix.PubSub.RabbitMQServer, [name]},
       ]
 
-    children = [
-      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [opts[:options]]),
-      :poolboy.child_spec(pub_pool_name, pub_pool_opts, conn_pool_name),
+    children = conn_pools ++ pub_pools ++ [
       supervisor(Phoenix.PubSub.LocalSupervisor, [name, pool_size, dispatch_rules]),
-      worker(Phoenix.PubSub.RabbitMQServer, [name, conn_pool_name, pub_pool_name, opts])
+      worker(Phoenix.PubSub.RabbitMQServer, [name, conn_pool_base, pub_pool_base, opts ++ [shard_num: shard_num]])
     ]
     supervise children, strategy: :one_for_one
+  end
+
+  def target_shard_index(shard_num, topic) do
+    rem(:erlang.phash2(topic), shard_num) + 1
+  end
+
+  def create_pool_name(pool_base, index) do
+    Module.concat([pool_base, "S#{index}"])
   end
 
   def with_conn(pool_name, fun) when is_function(fun, 1) do
