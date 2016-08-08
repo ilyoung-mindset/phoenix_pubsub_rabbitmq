@@ -24,8 +24,8 @@ defmodule Phoenix.PubSub.RabbitMQServer do
   def init([server_name, conn_pool_base, pub_pool_base, opts]) do
     Process.flag(:trap_exit, true)
     ## TODO: make state compact
-    {:ok, %{cons: HashDict.new,
-            subs: HashDict.new,
+    {:ok, %{cons: :ets.new(:rmq_cons, [:set, :private]),
+            subs: :ets.new(:rmq_subs, [:set, :private]),
             conn_pool_base: conn_pool_base,
             pub_pool_base: pub_pool_base,
             exchange: rabbitmq_namespace(server_name),
@@ -46,9 +46,10 @@ defmodule Phoenix.PubSub.RabbitMQServer do
   def handle_call({:subscribe, pid, topic, opts}, _from, state) do
     link = Keyword.get(opts, :link, false)
 
-    has_key = case Dict.get(state.subs, topic) do
-                {pids, size} when size > 0 -> Dict.has_key?(pids, pid)
-                _                          -> false
+    subs_list = :ets.lookup(state.subs, topic)
+    has_key = case subs_list do
+                [] -> false
+                [{^topic, pids}] -> Enum.find_value(pids, false, fn(x) -> elem(x, 0) == pid end)
               end
 
     unless has_key do
@@ -63,23 +64,30 @@ defmodule Phoenix.PubSub.RabbitMQServer do
 
       if link, do: Process.link(pid)
 
-      {:reply, :ok, %{state | subs: add_subscriber(state.subs, pid, topic, consumer_pid),
-                              cons: Dict.put(state.cons, consumer_pid, {topic, pid})}}
+      :ets.insert(state.cons, {consumer_pid, {topic, pid}})
+      pids = case subs_list do
+        []                -> []
+        [{^topic, pids}]  -> pids
+      end
+      :ets.insert(state.subs, {topic, pids ++ [{pid, consumer_pid}]})
+
+      {:reply, :ok, state}
     end
   end
 
   def handle_call({:unsubscribe, pid, topic}, _from, state) do
-    case Dict.fetch(state.subs, topic) do
-      {:ok, {pids, _size}} ->
-        case Dict.fetch(pids, pid) do
-          {:ok, consumer_pid} ->
+    case :ets.lookup(state.subs, topic) do
+      [] ->
+        {:reply, :ok, state}
+      [{^topic, pids}] ->
+        case Enum.find(pids, false, fn(x) -> elem(x, 0) == pid end) do
+          nil ->
+            {:reply, :ok, state}
+          {^pid, consumer_pid} ->
             :ok = Consumer.stop(consumer_pid)
-            {:reply, :ok, %{state | subs: delete_subscriber(state.subs, pid, topic)}}
-          :error ->
+            delete_subscriber(state.subs, pid, topic)
             {:reply, :ok, state}
         end
-      :error ->
-        {:reply, :ok, state}
     end
   end
 
@@ -88,9 +96,9 @@ defmodule Phoenix.PubSub.RabbitMQServer do
   end
 
   def handle_call({:subscribers, topic}, _from, state) do
-    case Dict.get(state.subs, topic, {HashDict.new, 0}) do
-      {pids, size} when size > 0 -> {:reply, Dict.keys(pids), state}
-      {_, 0}                     -> {:reply, [], state}
+    case :ets.lookup(state.subs, topic) do
+      []                -> {:reply, [], state}
+      [{^topic, pids}]  -> {:reply, Enum.map(pids, fn(x) -> elem(x, 0) end), state}
     end
   end
 
@@ -109,11 +117,11 @@ defmodule Phoenix.PubSub.RabbitMQServer do
 
   def handle_info({:DOWN, _ref, :process, pid,  _reason}, state) do
     state =
-      case Dict.fetch(state.cons, pid) do
-        {:ok, {topic, sub_pid}} ->
-          %{state | cons: Dict.delete(state.cons, pid),
-                    subs: delete_subscriber(state.subs, sub_pid, topic)}
-        :error ->
+      case :ets.lookup(state.cons, pid) do
+        [] -> state
+        [{^pid, {topic, sub_pid}}] ->
+          :ets.delete(state.cons, pid)
+          delete_subscriber(state.subs, sub_pid, topic)
           state
       end
     {:noreply, state}
@@ -124,23 +132,17 @@ defmodule Phoenix.PubSub.RabbitMQServer do
     {:noreply, state}
   end
 
-  defp add_subscriber(subs, pid, topic, consumer_pid) do
-    subs
-    |> Dict.put_new(topic, {HashDict.new, 0})
-    |> Dict.update!(topic, fn {dict, size} -> {Dict.put_new(dict, pid, consumer_pid), size + 1} end)
-  end
-
   defp delete_subscriber(subs, pid, topic) do
-    case Dict.fetch(subs, topic) do
-      {:ok, {pids, size}} ->
-        {pids, size} = {Dict.delete(pids, pid), size - 1}
-
-        if size > 0 do
-          Dict.put(subs, topic, pids)
+    case :ets.lookup(subs, topic) do
+      []                ->
+        subs
+      [{^topic, pids}]  ->
+        remain_pids = List.keydelete(pids, pid, 0)
+        if length(remain_pids) > 0 do
+          :ets.insert(subs, {topic, remain_pids})
         else
-          Dict.delete(subs, topic)
+          :ets.delete(subs, topic)
         end
-      :error ->
         subs
     end
   end
