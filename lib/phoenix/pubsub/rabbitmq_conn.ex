@@ -50,6 +50,11 @@ defmodule Phoenix.PubSub.RabbitMQConn do
     {:noreply, %{state | conn: nil, status: :disconnected}}
   end
 
+  def handle_info({:EXIT, _ref, :shutdown}, %{conn: conn, status: :connected} = state) do
+    Connection.close(conn)
+    {:noreply, %{state | conn: nil, status: :disconnected}}
+  end
+
   def terminate(_reason, %{conn: conn, status: :connected}) do
     try do
       Connection.close(conn)

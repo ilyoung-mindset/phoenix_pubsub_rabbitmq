@@ -54,7 +54,8 @@ defmodule Phoenix.PubSub.RabbitMQ do
     conn_pool_base = Module.concat(__MODULE__, ConnPool) |> Module.concat(name)
     pub_pool_base  = Module.concat(__MODULE__, PubPool)  |> Module.concat(name)
 
-    hosts = opts[:options][:hosts]
+    options = opts[:options] || []
+    hosts = options[:hosts] || ["localhost"]
     shard_num = length(hosts)
 
     conn_pools = 1..shard_num |> Enum.map(fn(n) ->
@@ -66,7 +67,7 @@ defmodule Phoenix.PubSub.RabbitMQ do
         strategy: :fifo,
         max_overflow: 0
       ]
-      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [opts[:options] ++ [host: Enum.at(hosts, n - 1)]])
+      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [options ++ [host: Enum.at(hosts, n - 1)]])
     end)
 
     pub_pools = 1..shard_num |> Enum.map(fn(n) ->

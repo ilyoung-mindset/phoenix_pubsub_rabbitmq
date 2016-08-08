@@ -1,4 +1,5 @@
 %{"amqp": {:git, "https://github.com/mtokioka/amqp.git", "e160b6321782b14954a025a436ecd5c0af0fe9ea", []},
   "amqp_client": {:git, "https://github.com/jbrisbin/amqp_client.git", "a509e5d4d731d6edeb755bd0f59250ebaf1f0130", []},
+  "phoenix_pubsub": {:hex, :phoenix_pubsub, "1.0.0", "c31af4be22afeeebfaf246592778c8c840e5a1ddc7ca87610c41ccfb160c2c57", [:mix], []},
   "poolboy": {:hex, :poolboy, "1.5.1", "6b46163901cfd0a1b43d692657ed9d7e599853b3b21b95ae5ae0a777cf9b6ca8", [:rebar], []},
   "rabbit_common": {:git, "https://github.com/jbrisbin/rabbit_common.git", "eea16abd375981d16595d2cefaac893c7281187b", [tag: "rabbitmq-3.5.6"]}}

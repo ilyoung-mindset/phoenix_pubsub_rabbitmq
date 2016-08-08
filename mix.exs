@@ -13,12 +13,14 @@ defmodule Phoenix.PubSub.RabbitMQ.Mixfile do
   end
 
   def application do
-    [applications: [:logger, :amqp, :poolboy]]
+    [applications: [:logger, :amqp, :poolboy, :phoenix_pubsub]]
   end
 
   defp deps do
     [{:poolboy, ">= 1.4.2"},
-     {:amqp, git: "https://github.com/mtokioka/amqp.git"}]
+     {:amqp, git: "https://github.com/mtokioka/amqp.git"},
+     {:phoenix_pubsub, ">= 1.0.0"}
+    ]
   end
 
   defp description do
