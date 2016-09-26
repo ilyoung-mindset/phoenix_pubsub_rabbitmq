@@ -63,7 +63,7 @@ defmodule Phoenix.PubSub.RabbitMQConsumer do
 
   def handle_info({:basic_deliver, payload, %{delivery_tag: delivery_tag}}, state) do
     {remote_node_ref, from_pid, msg} = :erlang.binary_to_term(payload)
-    if from_pid == :none or remote_node_ref != state.node_ref and from_pid != state.pid do
+    if from_pid == :none or remote_node_ref != state.node_ref or from_pid != state.pid do
       send(state.pid, msg)
     end
     Basic.ack(state.chan, delivery_tag)
