@@ -53,10 +53,14 @@ defmodule Phoenix.PubSub.RabbitMQ do
   def init([name, opts]) do
     conn_pool_base = Module.concat(__MODULE__, ConnPool) |> Module.concat(name)
     pub_pool_base  = Module.concat(__MODULE__, PubPool)  |> Module.concat(name)
+    bk_conn_pool_base = Module.concat(__MODULE__, BkConnPool) |> Module.concat(name)
 
     options = opts[:options] || []
     hosts = options[:hosts] || ["localhost"]
     shard_num = length(hosts)
+
+    bk_hosts = options[:bk_hosts] || ["localhost"]
+    bk_shard_num = length(bk_hosts)
 
     conn_pools = 1..shard_num |> Enum.map(fn(n) ->
       conn_pool_name = create_pool_name(conn_pool_base, n)
@@ -68,6 +72,17 @@ defmodule Phoenix.PubSub.RabbitMQ do
         max_overflow: 0
       ]
       :poolboy.child_spec(conn_pool_name, conn_pool_opts, [options ++ [host: Enum.at(hosts, n - 1)]])
+    end)
+    bk_conn_pools = 1..bk_shard_num |> Enum.map(fn(n) ->
+      conn_pool_name = create_pool_name(bk_conn_pool_base, n)
+      conn_pool_opts = [
+        name: {:local, conn_pool_name},
+        worker_module: Phoenix.PubSub.RabbitMQConn,
+        size: opts[:pool_size] || @pool_size,
+        strategy: :fifo,
+        max_overflow: 0
+      ]
+      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [options ++ [host: Enum.at(bk_hosts, n - 1)]])
     end)
 
     pub_pools = 1..shard_num |> Enum.map(fn(n) ->
@@ -91,8 +106,8 @@ defmodule Phoenix.PubSub.RabbitMQ do
 
     children = conn_pools ++ pub_pools ++ [
       supervisor(Phoenix.PubSub.LocalSupervisor, [name, pool_size, dispatch_rules]),
-      worker(Phoenix.PubSub.RabbitMQServer, [name, conn_pool_base, pub_pool_base, opts ++ [shard_num: shard_num]])
-    ]
+      worker(Phoenix.PubSub.RabbitMQServer, [name, conn_pool_base, pub_pool_base, bk_conn_pool_base, opts ++ [shard_num: shard_num, bk_shard_num: bk_shard_num]])
+    ] ++ bk_conn_pools
     supervise children, strategy: :one_for_one
   end
 
