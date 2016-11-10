@@ -58,9 +58,13 @@ defmodule Phoenix.PubSub.RabbitMQ do
     options = opts[:options] || []
     hosts = options[:hosts] || ["localhost"]
     shard_num = length(hosts)
+    HashRing.Managed.new(:rabbitmq_pubsub_shard)
+    HashRing.Managed.add_nodes(:rabbitmq_pubsub_shard, Enum.map(1..shard_num, fn(x) -> Integer.to_string(x) end))
 
-    bk_hosts = options[:bk_hosts] || ["localhost"]
+    bk_hosts = options[:bk_hosts] || []
     bk_shard_num = length(bk_hosts)
+    HashRing.Managed.new(:rabbitmq_pubsub_bk_shard)
+    HashRing.Managed.add_nodes(:rabbitmq_pubsub_bk_shard, Enum.map(1..bk_shard_num, fn(x) -> Integer.to_string(x) end))
 
     conn_pools = 1..shard_num |> Enum.map(fn(n) ->
       conn_pool_name = create_pool_name(conn_pool_base, n)
@@ -111,8 +115,12 @@ defmodule Phoenix.PubSub.RabbitMQ do
     supervise children, strategy: :one_for_one
   end
 
-  def target_shard_index(shard_num, topic) do
-    rem(:erlang.phash2(topic), shard_num) + 1
+  def target_shard_index(topic) do
+    String.to_integer(HashRing.Managed.key_to_node(:rabbitmq_pubsub_shard, topic))
+  end
+
+  def target_bk_shard_index(topic) do
+    String.to_integer(HashRing.Managed.key_to_node(:rabbitmq_pubsub_bk_shard, topic))
   end
 
   def create_pool_name(pool_base, index) do

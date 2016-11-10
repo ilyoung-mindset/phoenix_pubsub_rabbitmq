@@ -56,7 +56,7 @@ defmodule Phoenix.PubSub.RabbitMQServer do
               end
 
     unless has_key do
-      pool_index      = RabbitMQ.target_shard_index(state.opts[:shard_num], topic)
+      pool_index      = RabbitMQ.target_shard_index(topic)
       conn_pool_name = RabbitMQ.create_pool_name(state.conn_pool_base, pool_index)
       {:ok, consumer_pid} = Consumer.start(conn_pool_name,
                                            state.exchange, topic,
@@ -75,7 +75,7 @@ defmodule Phoenix.PubSub.RabbitMQServer do
       :ets.insert(state.subs, {topic, pids ++ [{pid, consumer_pid}]})
 
       # register bk server
-      bk_pool_index      = RabbitMQ.target_shard_index(state.opts[:bk_shard_num], topic)
+      bk_pool_index      = RabbitMQ.target_bk_shard_index(topic)
       if state.opts[:bk_shard_num] > 0 && Enum.at(state.opts[:options][:hosts], pool_index-1) != Enum.at(state.opts[:options][:bk_hosts], bk_pool_index-1) do
         bk_conn_pool_name = RabbitMQ.create_pool_name(state.bk_conn_pool_base, bk_pool_index)
         {:ok, bk_consumer_pid} = Consumer.start(bk_conn_pool_name,
@@ -139,7 +139,7 @@ defmodule Phoenix.PubSub.RabbitMQServer do
   end
 
   def handle_call({:broadcast, from_pid, topic, msg}, _from, state) do
-    pool_index    = RabbitMQ.target_shard_index(state.opts[:shard_num], topic)
+    pool_index    = RabbitMQ.target_shard_index(topic)
     pub_pool_name = RabbitMQ.create_pool_name(state.pub_pool_base, pool_index)
     case RabbitMQ.publish(pub_pool_name,
                           state.exchange,
