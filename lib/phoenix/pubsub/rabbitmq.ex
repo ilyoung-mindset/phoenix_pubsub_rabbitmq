@@ -51,23 +51,26 @@ defmodule Phoenix.PubSub.RabbitMQ do
   end
 
   def init([name, opts]) do
-    conn_pool_base = Module.concat(__MODULE__, ConnPool) |> Module.concat(name)
-    pub_pool_base  = Module.concat(__MODULE__, PubPool)  |> Module.concat(name)
-    bk_conn_pool_base = Module.concat(__MODULE__, BkConnPool) |> Module.concat(name)
+    conn_pool_base = Module.concat(__MODULE__, ConnPool)
+    pub_pool_base  = Module.concat(__MODULE__, PubPool)
+    bk_conn_pool_base = Module.concat(__MODULE__, BkConnPool)
 
     options = opts[:options] || []
     hosts = options[:hosts] || ["localhost"]
     shard_num = length(hosts)
     HashRing.Managed.new(:rabbitmq_pubsub_shard)
-    HashRing.Managed.add_nodes(:rabbitmq_pubsub_shard, Enum.map(1..shard_num, fn(x) -> Integer.to_string(x) end))
+    HashRing.Managed.add_nodes(:rabbitmq_pubsub_shard, hosts)
 
     bk_hosts = options[:bk_hosts] || []
     bk_shard_num = length(bk_hosts)
     HashRing.Managed.new(:rabbitmq_pubsub_bk_shard)
-    HashRing.Managed.add_nodes(:rabbitmq_pubsub_bk_shard, Enum.map(1..bk_shard_num, fn(x) -> Integer.to_string(x) end))
+    HashRing.Managed.add_nodes(:rabbitmq_pubsub_bk_shard, bk_hosts)
 
-    conn_pools = 1..shard_num |> Enum.map(fn(n) ->
-      conn_pool_name = create_pool_name(conn_pool_base, n)
+    # to make state smaller
+    options = List.keydelete(options, :hosts, 0) |> List.keydelete(:bk_hosts, 0)
+
+    conn_pools = hosts |> Enum.map(fn(host) ->
+      conn_pool_name = create_pool_name(conn_pool_base, host)
       conn_pool_opts = [
         name: {:local, conn_pool_name},
         worker_module: Phoenix.PubSub.RabbitMQConn,
@@ -75,10 +78,10 @@ defmodule Phoenix.PubSub.RabbitMQ do
         strategy: :fifo,
         max_overflow: 0
       ]
-      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [options ++ [host: Enum.at(hosts, n - 1)]])
+      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [options ++ [host: host]])
     end)
-    bk_conn_pools = 1..bk_shard_num |> Enum.map(fn(n) ->
-      conn_pool_name = create_pool_name(bk_conn_pool_base, n)
+    bk_conn_pools = bk_hosts |> Enum.map(fn(host) ->
+      conn_pool_name = create_pool_name(bk_conn_pool_base, host)
       conn_pool_opts = [
         name: {:local, conn_pool_name},
         worker_module: Phoenix.PubSub.RabbitMQConn,
@@ -86,12 +89,12 @@ defmodule Phoenix.PubSub.RabbitMQ do
         strategy: :fifo,
         max_overflow: 0
       ]
-      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [options ++ [host: Enum.at(bk_hosts, n - 1)]])
+      :poolboy.child_spec(conn_pool_name, conn_pool_opts, [options ++ [host: host]])
     end)
 
-    pub_pools = 1..shard_num |> Enum.map(fn(n) ->
-      conn_pool_name  = create_pool_name(conn_pool_base, n)
-      pub_pool_name   = create_pool_name(pub_pool_base, n)
+    pub_pools = hosts |> Enum.map(fn(host) ->
+      conn_pool_name  = create_pool_name(conn_pool_base, host)
+      pub_pool_name   = create_pool_name(pub_pool_base, host)
       pub_pool_opts = [
         name: {:local, pub_pool_name},
         worker_module: Phoenix.PubSub.RabbitMQPub,
@@ -110,21 +113,21 @@ defmodule Phoenix.PubSub.RabbitMQ do
 
     children = conn_pools ++ pub_pools ++ [
       supervisor(Phoenix.PubSub.LocalSupervisor, [name, pool_size, dispatch_rules]),
-      worker(Phoenix.PubSub.RabbitMQServer, [name, conn_pool_base, pub_pool_base, bk_conn_pool_base, opts ++ [shard_num: shard_num, bk_shard_num: bk_shard_num]])
+      worker(Phoenix.PubSub.RabbitMQServer, [name, conn_pool_base, pub_pool_base, bk_conn_pool_base, options ++ [shard_num: shard_num, bk_shard_num: bk_shard_num]])
     ] ++ bk_conn_pools
     supervise children, strategy: :one_for_one
   end
 
-  def target_shard_index(topic) do
-    String.to_integer(HashRing.Managed.key_to_node(:rabbitmq_pubsub_shard, topic))
+  def target_shard_host(topic) do
+    HashRing.Managed.key_to_node(:rabbitmq_pubsub_shard, topic)
   end
 
-  def target_bk_shard_index(topic) do
-    String.to_integer(HashRing.Managed.key_to_node(:rabbitmq_pubsub_bk_shard, topic))
+  def target_bk_shard_host(topic) do
+    HashRing.Managed.key_to_node(:rabbitmq_pubsub_bk_shard, topic)
   end
 
-  def create_pool_name(pool_base, index) do
-    Module.concat([pool_base, "S#{index}"])
+  def create_pool_name(pool_base, host) do
+    Module.concat([pool_base, "_#{host}"])
   end
 
   def with_conn(pool_name, fun) when is_function(fun, 1) do
