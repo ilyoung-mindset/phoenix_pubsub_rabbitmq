@@ -3,7 +3,7 @@ defmodule Phoenix.PubSub.RabbitMQPub do
   use AMQP
   alias Phoenix.PubSub.RabbitMQ
 
-  @reconnect_after_ms 5_000
+  @reconnect_after_ms 10
 
   @moduledoc """
   Worker for pooled publishers to RabbitMQ
@@ -43,7 +43,7 @@ defmodule Phoenix.PubSub.RabbitMQPub do
   end
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
-    :timer.send_after(@reconnect_after_ms, :connect)
+    send(self, :connect)
     {:noreply, %{state | status: :disconnected}}
   end
 
