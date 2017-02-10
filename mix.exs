@@ -5,10 +5,10 @@ defmodule Phoenix.PubSub.RabbitMQ.Mixfile do
     [app: :phoenix_pubsub_rabbitmq,
      version: "0.0.1",
      elixir: "~> 1.0",
-     description: description,
-     package: package,
+     description: description(),
+     package: package(),
      source_url: "https://github.com/pma/phoenix_pubsub_rabbitmq",
-     deps: deps,
+     deps: deps(),
      docs: [readme: "README.md", main: "README"]]
   end
 
@@ -18,7 +18,7 @@ defmodule Phoenix.PubSub.RabbitMQ.Mixfile do
 
   defp deps do
     [{:poolboy, ">= 1.4.2"},
-     {:amqp, git: "https://github.com/mtokioka/amqp.git"},
+     {:amqp, "~> 0.2.0-pre.1"},
      {:phoenix_pubsub, ">= 1.0.0"},
      {:libring, "~> 1.0"},
     ]
