@@ -51,9 +51,10 @@ defmodule Phoenix.PubSub.RabbitMQ do
   end
 
   def init([name, opts]) do
-    conn_pool_base = Module.concat(__MODULE__, ConnPool)
-    pub_pool_base  = Module.concat(__MODULE__, PubPool)
-    bk_conn_pool_base = Module.concat(__MODULE__, BkConnPool)
+    supervisor_name = Module.concat(__MODULE__, name)
+    conn_pool_base = Module.concat(supervisor_name, ConnPool)
+    pub_pool_base  = Module.concat(supervisor_name, PubPool)
+    bk_conn_pool_base = Module.concat(supervisor_name, BkConnPool)
 
     options = opts[:options] || []
     hosts = options[:hosts] || ["localhost"]
